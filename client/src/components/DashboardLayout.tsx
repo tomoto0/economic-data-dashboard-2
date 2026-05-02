@@ -158,7 +158,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: { children: React
             </div>
           </div>
         )}
-        <main className={isDark ? "min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_30%),radial-gradient(circle_at_70%_10%,rgba(99,102,241,0.22),transparent_28%),linear-gradient(135deg,#020617_0%,#07111f_48%,#0f172a_100%)] text-slate-100" : "min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_32%),linear-gradient(135deg,#f8fafc_0%,#e0f2fe_48%,#eef2ff_100%)] text-slate-950"}>
+        <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_30%),radial-gradient(circle_at_70%_10%,rgba(99,102,241,0.22),transparent_28%),linear-gradient(135deg,#020617_0%,#07111f_48%,#0f172a_100%)] text-slate-100">
           {children}
         </main>
       </SidebarInset>
