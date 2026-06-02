@@ -19,6 +19,9 @@ let _db: ReturnType<typeof drizzle> | null = null;
 let seedPromise: Promise<void> | null = null;
 const SOURCE_HASH = "repository-economic-data-2025-06-23-v1";
 
+/** 24-hour TTL for World Bank API cache entries */
+const WB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export type IndicatorKey = (typeof economicDataPayload.indicators)[number]["key"];
 export type CountryCode = (typeof economicDataPayload.countries)[number]["code"];
 
@@ -27,6 +30,24 @@ export type EconomicFilter = {
   indicator?: string;
   yearStart?: number;
   yearEnd?: number;
+};
+
+/** Describes where a data point originated */
+export type DataSource = "world_bank_live" | "world_bank_cache" | "snapshot";
+
+export type EconomicRecord = {
+  countryCode: string;
+  countryIso3: string;
+  countryName: string;
+  indicatorKey: string;
+  indicatorLabel: string;
+  indicatorSourceName: string;
+  unit: string;
+  valueFormat: string;
+  worldBankCode: string;
+  year: number;
+  value: number | null;
+  source: string;
 };
 
 export async function getDb() {
@@ -73,27 +94,22 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-function fallbackRecords(filter: EconomicFilter = {}) {
-  const countries = filter.countries?.length ? filter.countries : economicDataPayload.countries.map(country => country.code);
-  const indicator = filter.indicator ?? "gdp";
-  const yearStart = filter.yearStart ?? 2000;
-  const yearEnd = filter.yearEnd ?? 2026;
-  return economicDataPayload.records.filter(record =>
-    countries.includes(record.countryCode) &&
-    record.indicatorKey === indicator &&
-    record.year >= yearStart &&
-    record.year <= yearEnd,
-  );
-}
+// ---------------------------------------------------------------------------
+// Catalog helpers
+// ---------------------------------------------------------------------------
 
 export function getCatalog() {
   return {
     countries: economicDataPayload.countries,
     indicators: economicDataPayload.indicators,
-    yearRange: { min: 2000, max: 2026 },
+    yearRange: { min: 2000, max: new Date().getFullYear() },
     recordCount: economicDataPayload.recordCount,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot seeding (CSV-derived baseline, runs once)
+// ---------------------------------------------------------------------------
 
 export async function ensureEconomicDataSeeded() {
   if (seedPromise) return seedPromise;
@@ -140,50 +156,266 @@ export async function ensureEconomicDataSeeded() {
   return seedPromise;
 }
 
-export async function getEconomicRecords(filter: EconomicFilter = {}) {
-  await ensureEconomicDataSeeded();
-  const db = await getDb();
-  if (!db) return fallbackRecords(filter);
+// ---------------------------------------------------------------------------
+// World Bank API live-fetch with TTL cache
+// ---------------------------------------------------------------------------
 
-  const countries = filter.countries?.length ? filter.countries : economicDataPayload.countries.map(country => country.code);
-  const indicator = filter.indicator ?? "gdp";
-  const yearStart = filter.yearStart ?? 2000;
-  const yearEnd = filter.yearEnd ?? 2026;
-
-  try {
-    return await db
-      .select()
-      .from(economicDataPoints)
-      .where(and(
-        inArray(economicDataPoints.countryCode, countries),
-        eq(economicDataPoints.indicatorKey, indicator),
-        gte(economicDataPoints.year, yearStart),
-        lte(economicDataPoints.year, yearEnd),
-      ))
-      .orderBy(economicDataPoints.year, economicDataPoints.countryCode);
-  } catch (error) {
-    console.warn("[Database] Query failed; falling back to bundled data:", error);
-    return fallbackRecords(filter);
-  }
+/**
+ * Fetch a single country+indicator time series from the World Bank Open Data API.
+ * Returns parsed data rows and the source label.
+ */
+async function fetchFromWorldBank(
+  iso3: string,
+  wbCode: string,
+  yearStart: number,
+  yearEnd: number,
+): Promise<{ rows: Array<{ year: number; value: number | null }>; fetchedAt: Date }> {
+  const url = `https://api.worldbank.org/v2/country/${iso3}/indicator/${wbCode}?format=json&per_page=100&date=${yearStart}:${yearEnd}&mrv=100`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+  if (!response.ok) throw new Error(`World Bank API returned HTTP ${response.status} for ${iso3}/${wbCode}`);
+  const json: any = await response.json();
+  const dataArray: any[] = Array.isArray(json) && json.length >= 2 ? json[1] ?? [] : [];
+  const rows = dataArray.map((item: any) => ({
+    year: parseInt(item.date, 10),
+    value: item.value !== null && item.value !== undefined ? Number(item.value) : null,
+  })).filter(row => !Number.isNaN(row.year));
+  return { rows, fetchedAt: new Date() };
 }
 
-export async function getLatestKpis(countries?: string[]) {
-  const selectedCountries = countries?.length ? countries : economicDataPayload.countries.map(country => country.code);
-  const indicators = economicDataPayload.indicators.map(indicator => indicator.key);
-  const records = await getEconomicRecords({ countries: selectedCountries, indicator: "gdp", yearStart: 2000, yearEnd: 2026 });
-  const useDbShape = records.length > 0 && "valueFormat" in records[0];
+/**
+ * Check the cache for a valid (non-expired) entry.
+ */
+export async function getCachedWorldBankResult(cacheKey: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(worldBankCache).where(eq(worldBankCache.cacheKey, cacheKey)).limit(1);
+  const entry = rows[0];
+  if (!entry) return null;
+  // Return null if expired so caller will re-fetch
+  if (entry.expiresAt < new Date()) return null;
+  return entry;
+}
 
-  const allRecords = useDbShape
-    ? await Promise.all(indicators.map(indicator => getEconomicRecords({ countries: selectedCountries, indicator, yearStart: 2000, yearEnd: 2026 }))).then(chunks => chunks.flat())
-    : economicDataPayload.records.filter(record => selectedCountries.includes(record.countryCode) && indicators.includes(record.indicatorKey));
+/**
+ * Persist a World Bank API response to the cache with a 24-hour TTL.
+ */
+export async function saveWorldBankCache(input: InsertWorldBankCache) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(worldBankCache).values(input).onDuplicateKeyUpdate({
+    set: {
+      payload: input.payload,
+      fetchedAt: sql`CURRENT_TIMESTAMP`,
+      expiresAt: input.expiresAt,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    },
+  });
+}
+
+/**
+ * Invalidate (delete) all cache entries for a given country+indicator combination
+ * so the next request forces a fresh World Bank fetch.
+ */
+export async function invalidateWorldBankCache(countryCode: string, indicatorKey: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .delete(worldBankCache)
+    .where(and(eq(worldBankCache.countryCode, countryCode), eq(worldBankCache.indicatorKey, indicatorKey)));
+}
+
+// ---------------------------------------------------------------------------
+// Primary data accessor — World Bank API first, cache second, snapshot fallback
+// ---------------------------------------------------------------------------
+
+export type GetEconomicRecordsResult = {
+  records: EconomicRecord[];
+  dataSource: DataSource;
+  fetchedAt: Date | null;
+};
+
+/**
+ * Retrieve economic records for the given filter.
+ *
+ * Priority:
+ *  1. World Bank Open Data API (live fetch, result cached 24 h)
+ *  2. Valid unexpired cache entry from a previous live fetch
+ *  3. DB snapshot seeded from repository CSV
+ *  4. In-memory bundled data (if DB is unavailable)
+ */
+export async function getEconomicRecords(filter: EconomicFilter = {}): Promise<GetEconomicRecordsResult> {
+  await ensureEconomicDataSeeded();
+
+  const countries = filter.countries?.length ? filter.countries : economicDataPayload.countries.map(c => c.code);
+  const indicator = filter.indicator ?? "gdp";
+  const yearStart = filter.yearStart ?? 2000;
+  const yearEnd = filter.yearEnd ?? new Date().getFullYear();
+
+  const catalogIndicator = economicDataPayload.indicators.find(i => i.key === indicator);
+  if (!catalogIndicator) {
+    return { records: fallbackRecords(filter), dataSource: "snapshot", fetchedAt: null };
+  }
+
+  // Try to fetch live from World Bank for each requested country
+  const liveRecords: EconomicRecord[] = [];
+  let anyLive = false;
+  let anyCache = false;
+  let latestFetchedAt: Date | null = null;
+
+  for (const countryCode of countries) {
+    const country = economicDataPayload.countries.find(c => c.code === countryCode);
+    if (!country) continue;
+    const iso3 = country.iso3;
+    const cacheKey = `${iso3}:${catalogIndicator.worldBankCode}:${yearStart}:${yearEnd}`;
+
+    // Check cache first
+    const cached = await getCachedWorldBankResult(cacheKey);
+    if (cached) {
+      // Valid cache hit — parse and use
+      try {
+        const payload: any = JSON.parse(cached.payload);
+        const dataArray: any[] = Array.isArray(payload) && payload.length >= 2 ? payload[1] ?? [] : [];
+        for (const item of dataArray) {
+          const year = parseInt(item.date, 10);
+          if (Number.isNaN(year) || year < yearStart || year > yearEnd) continue;
+          liveRecords.push({
+            countryCode: country.code,
+            countryIso3: iso3,
+            countryName: country.name,
+            indicatorKey: indicator,
+            indicatorLabel: catalogIndicator.label,
+            indicatorSourceName: (catalogIndicator as any).sourceName ?? catalogIndicator.label,
+            unit: catalogIndicator.unit,
+            valueFormat: catalogIndicator.format,
+            worldBankCode: catalogIndicator.worldBankCode,
+            year,
+            value: item.value !== null && item.value !== undefined ? Number(item.value) : null,
+            source: "World Bank Open Data (cached)",
+          });
+        }
+        anyCache = true;
+        if (!latestFetchedAt || cached.fetchedAt > latestFetchedAt) latestFetchedAt = cached.fetchedAt;
+        continue;
+      } catch {
+        // Corrupted cache — fall through to live fetch
+      }
+    }
+
+    // Live fetch from World Bank API
+    try {
+      const { rows, fetchedAt } = await fetchFromWorldBank(iso3, catalogIndicator.worldBankCode, yearStart, yearEnd);
+      const expiresAt = new Date(fetchedAt.getTime() + WB_CACHE_TTL_MS);
+
+      // Build raw WB API response format for caching
+      const fakePayload = JSON.stringify([
+        {},
+        rows.map(r => ({ date: String(r.year), value: r.value })),
+      ]);
+      await saveWorldBankCache({
+        cacheKey,
+        countryCode: iso3,
+        indicatorKey: indicator,
+        yearStart,
+        yearEnd,
+        payload: fakePayload,
+        expiresAt,
+      } as InsertWorldBankCache & { expiresAt: Date });
+
+      for (const row of rows) {
+        if (row.year < yearStart || row.year > yearEnd) continue;
+        liveRecords.push({
+          countryCode: country.code,
+          countryIso3: iso3,
+          countryName: country.name,
+          indicatorKey: indicator,
+          indicatorLabel: catalogIndicator.label,
+          indicatorSourceName: (catalogIndicator as any).sourceName ?? catalogIndicator.label,
+          unit: catalogIndicator.unit,
+          valueFormat: catalogIndicator.format,
+          worldBankCode: catalogIndicator.worldBankCode,
+          year: row.year,
+          value: row.value,
+          source: "World Bank Open Data (live)",
+        });
+      }
+      anyLive = true;
+      if (!latestFetchedAt || fetchedAt > latestFetchedAt) latestFetchedAt = fetchedAt;
+    } catch (error) {
+      console.warn(`[WorldBank] Live fetch failed for ${iso3}/${indicator}:`, error);
+      // Fall through — this country will be missing from liveRecords; handled below
+    }
+  }
+
+  // If we got live/cached data for at least some countries, return it
+  if (liveRecords.length > 0) {
+    const sorted = liveRecords.sort((a, b) => a.year - b.year || a.countryCode.localeCompare(b.countryCode));
+    return {
+      records: sorted,
+      dataSource: anyLive ? "world_bank_live" : "world_bank_cache",
+      fetchedAt: latestFetchedAt,
+    };
+  }
+
+  // Fallback: DB snapshot
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db
+        .select()
+        .from(economicDataPoints)
+        .where(and(
+          inArray(economicDataPoints.countryCode, countries),
+          eq(economicDataPoints.indicatorKey, indicator),
+          gte(economicDataPoints.year, yearStart),
+          lte(economicDataPoints.year, yearEnd),
+        ))
+        .orderBy(economicDataPoints.year, economicDataPoints.countryCode);
+      if (rows.length > 0) {
+        return { records: rows as EconomicRecord[], dataSource: "snapshot", fetchedAt: null };
+      }
+    } catch (error) {
+      console.warn("[Database] Snapshot query failed:", error);
+    }
+  }
+
+  // Final fallback: bundled in-memory data
+  return { records: fallbackRecords(filter), dataSource: "snapshot", fetchedAt: null };
+}
+
+function fallbackRecords(filter: EconomicFilter = {}): EconomicRecord[] {
+  const countries = filter.countries?.length ? filter.countries : economicDataPayload.countries.map(c => c.code);
+  const indicator = filter.indicator ?? "gdp";
+  const yearStart = filter.yearStart ?? 2000;
+  const yearEnd = filter.yearEnd ?? new Date().getFullYear();
+  return (economicDataPayload.records as unknown as any[]).filter(r =>
+    countries.includes(r.countryCode) &&
+    r.indicatorKey === indicator &&
+    r.year >= yearStart &&
+    r.year <= yearEnd,
+  ).map(r => ({ ...r, valueFormat: r.format }));
+}
+
+// ---------------------------------------------------------------------------
+// KPI comparison — uses live data pipeline
+// ---------------------------------------------------------------------------
+
+export async function getLatestKpis(countries?: string[]) {
+  const selectedCountries = countries?.length ? countries : economicDataPayload.countries.map(c => c.code);
+  const indicators = economicDataPayload.indicators.map(i => i.key);
+
+  const allRecords: EconomicRecord[] = [];
+  for (const indicatorKey of indicators) {
+    const result = await getEconomicRecords({ countries: selectedCountries, indicator: indicatorKey, yearStart: 2000, yearEnd: new Date().getFullYear() });
+    allRecords.push(...result.records);
+  }
 
   return selectedCountries.map(countryCode => {
-    const country = economicDataPayload.countries.find(item => item.code === countryCode);
+    const country = economicDataPayload.countries.find(c => c.code === countryCode);
     const kpis = indicators.map(indicatorKey => {
-      const indicator = economicDataPayload.indicators.find(item => item.key === indicatorKey);
+      const indicator = economicDataPayload.indicators.find(i => i.key === indicatorKey);
       const series = allRecords
-        .filter((record: any) => record.countryCode === countryCode && record.indicatorKey === indicatorKey && record.value !== null && record.value !== undefined)
-        .sort((a: any, b: any) => b.year - a.year);
+        .filter(r => r.countryCode === countryCode && r.indicatorKey === indicatorKey && r.value !== null && r.value !== undefined)
+        .sort((a, b) => b.year - a.year);
       const latest = series[0];
       const previous = series[1];
       return {
@@ -201,6 +433,10 @@ export async function getLatestKpis(countries?: string[]) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot metadata
+// ---------------------------------------------------------------------------
+
 export async function getSnapshotMetadata() {
   await ensureEconomicDataSeeded();
   const db = await getDb();
@@ -211,24 +447,9 @@ export async function getSnapshotMetadata() {
   return rows[0] ?? { source: "bundled", recordCount: economicDataPayload.recordCount, generatedAt: null };
 }
 
-export async function getCachedWorldBankResult(cacheKey: string) {
-  const db = await getDb();
-  if (!db) return null;
-  const rows = await db.select().from(worldBankCache).where(eq(worldBankCache.cacheKey, cacheKey)).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function saveWorldBankCache(input: InsertWorldBankCache) {
-  const db = await getDb();
-  if (!db) return;
-  await db.insert(worldBankCache).values(input).onDuplicateKeyUpdate({
-    set: {
-      payload: input.payload,
-      fetchedAt: sql`CURRENT_TIMESTAMP`,
-      updatedAt: sql`CURRENT_TIMESTAMP`,
-    },
-  });
-}
+// ---------------------------------------------------------------------------
+// Insight request persistence
+// ---------------------------------------------------------------------------
 
 export async function saveInsightRequest(input: InsertInsightRequest) {
   const db = await getDb();

@@ -53,6 +53,7 @@ export const worldBankCache = mysqlTable("world_bank_cache", {
   yearEnd: int("yearEnd").notNull(),
   payload: text("payload").notNull(),
   fetchedAt: timestamp("fetchedAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => ({

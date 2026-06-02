@@ -15,6 +15,13 @@
       "when": 1777711217599,
       "tag": "0001_exotic_saracen",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1780407846671,
+      "tag": "0002_whole_apocalypse",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `world_bank_cache` ADD `expiresAt` timestamp NOT NULL;

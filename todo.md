@@ -16,3 +16,15 @@
 - [x] Write Vitest tests for all tRPC API endpoints.
 - [x] Run type checks, Vitest tests, and production build checks.
 - [x] Save a final checkpoint and provide deployment handoff instructions.
+
+## World Bank Live-Fetch Upgrade
+
+- [x] Add `expiresAt` TTL column to `world_bank_cache` schema and migrate database.
+- [x] Rewrite `getEconomicRecords` to fetch live from World Bank API first, falling back to DB snapshot only when API is unavailable.
+- [x] Implement 24-hour TTL: skip live fetch if a valid unexpired cache entry exists; force-refresh on manual trigger.
+- [x] Add `economic.refreshData` tRPC mutation that clears cache for the selected country/indicator and re-fetches from World Bank.
+- [x] Update `economic.chartData` to return `dataSource` field ("world_bank_live" | "world_bank_cache" | "snapshot") and `fetchedAt` timestamp.
+- [x] Update frontend to show data source badge (Live / Cached / Snapshot) with last-fetched timestamp.
+- [x] Add manual refresh button to Explorer view that calls `economic.refreshData`.
+- [x] Update snapshot metadata card to reflect live World Bank data when available.
+- [x] Run tests, build, checkpoint.

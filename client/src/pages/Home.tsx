@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState, useMemo } from "react";
 import { Streamdown } from "streamdown";
 import {
   Area,
@@ -14,12 +14,27 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Bot, BrainCircuit, Database, ExternalLink, Globe2, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
+import {
+  Bot,
+  BrainCircuit,
+  CheckCircle2,
+  Clock,
+  Database,
+  ExternalLink,
+  Globe2,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  TrendingUp,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 
 const COUNTRY_COLORS: Record<string, string> = {
   US: "#22d3ee",
@@ -37,6 +52,7 @@ const COUNTRY_COLORS: Record<string, string> = {
 const DEFAULT_COUNTRIES = ["US", "CN", "JP", "DE", "GB"];
 
 type ViewName = "overview" | "explorer" | "comparison" | "insights" | "legacy";
+type DataSource = "world_bank_live" | "world_bank_cache" | "snapshot";
 
 function formatValue(value: number | null | undefined, format = "number") {
   if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
@@ -70,6 +86,48 @@ function ChartTooltip({ active, payload, label, format }: any) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Badge showing the data source origin with appropriate color and icon */
+function DataSourceBadge({ dataSource, fetchedAt }: { dataSource?: DataSource; fetchedAt?: Date | string | null }) {
+  if (!dataSource) return null;
+
+  const config: Record<DataSource, { label: string; icon: React.ReactNode; className: string }> = {
+    world_bank_live: {
+      label: "Live · World Bank",
+      icon: <Wifi className="h-3 w-3" />,
+      className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+    },
+    world_bank_cache: {
+      label: "Cached · World Bank",
+      icon: <CheckCircle2 className="h-3 w-3" />,
+      className: "border-cyan-400/30 bg-cyan-400/10 text-cyan-200",
+    },
+    snapshot: {
+      label: "Snapshot · CSV",
+      icon: <Database className="h-3 w-3" />,
+      className: "border-slate-400/30 bg-slate-400/10 text-slate-300",
+    },
+  };
+
+  const { label, icon, className } = config[dataSource];
+  const ts = fetchedAt ? new Date(fetchedAt as string) : null;
+  const timeStr = ts && !Number.isNaN(ts.getTime()) ? ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium ${className}`}>
+        {icon}
+        {label}
+      </Badge>
+      {timeStr && (
+        <span className="flex items-center gap-1 text-xs text-slate-400">
+          <Clock className="h-3 w-3" />
+          {timeStr}
+        </span>
+      )}
     </div>
   );
 }
@@ -127,6 +185,21 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
   const chart = trpc.economic.chartData.useQuery(queryInput);
   const comparison = trpc.economic.comparison.useQuery({ countries: countries.length ? countries : DEFAULT_COUNTRIES });
   const insight = trpc.economic.insight.useMutation();
+  const utils = trpc.useUtils();
+
+  const refreshMutation = trpc.economic.refreshData.useMutation({
+    onSuccess: (data) => {
+      // Invalidate the chart query so it re-fetches the fresh data from cache
+      utils.economic.chartData.invalidate(queryInput);
+      utils.economic.comparison.invalidate();
+      toast.success(`Refreshed ${data.countriesRefreshed} country/countries from World Bank API`, {
+        description: `Data source: ${data.dataSource} · ${data.series?.length ?? 0} data points`,
+      });
+    },
+    onError: (error) => {
+      toast.error("Refresh failed", { description: error.message });
+    },
+  });
 
   const selectedIndicator = chart.data?.indicator;
   const latestYear = chart.data?.series?.at(-1)?.year ?? yearEnd;
@@ -136,6 +209,10 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
   })) ?? [];
 
   const runInsight = () => insight.mutate(queryInput);
+  const runRefresh = () => refreshMutation.mutate(queryInput);
+
+  const dataSource = chart.data?.dataSource as DataSource | undefined;
+  const fetchedAt = chart.data?.fetchedAt;
 
   return (
     <div className="min-h-screen p-4 sm:p-6 lg:p-8">
@@ -144,7 +221,7 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
           <div className="max-w-3xl">
             <Badge className="mb-4 border-cyan-300/30 bg-cyan-300/10 text-cyan-100" variant="outline">Full-stack economic intelligence</Badge>
             <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-5xl">Global Economic Data Dashboard</h1>
-            <p className="mt-4 text-base leading-7 text-slate-300 sm:text-lg">A Manus-powered dashboard that preserves the original World Bank Open Data logic while adding Database-backed snapshots, tRPC APIs, Recharts visual analytics, and AI-generated economic summaries.</p>
+            <p className="mt-4 text-base leading-7 text-slate-300 sm:text-lg">A Manus-powered dashboard that fetches live data from the World Bank Open Data API with a 24-hour cache, Database-backed snapshots, tRPC APIs, Recharts visual analytics, and AI-generated economic summaries.</p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4 lg:min-w-[520px]">
             <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><p className="text-slate-400">Countries</p><p className="mt-2 text-2xl font-semibold text-white">10</p></div>
@@ -173,10 +250,47 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
         <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
           <aside className="space-y-6">
             <FilterPanel catalog={catalog.data} countries={countries} setCountries={setCountries} indicator={indicator} setIndicator={setIndicator} yearStart={yearStart} setYearStart={setYearStart} yearEnd={yearEnd} setYearEnd={setYearEnd} />
+
+            {/* Data source status card */}
+            <Card className="border-white/10 bg-white/[0.04] text-white shadow-2xl backdrop-blur-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  {dataSource === "world_bank_live" ? <Wifi className="h-5 w-5 text-emerald-300" /> : dataSource === "world_bank_cache" ? <CheckCircle2 className="h-5 w-5 text-cyan-300" /> : <Database className="h-5 w-5 text-slate-400" />}
+                  Data source
+                </CardTitle>
+                <CardDescription className="text-slate-400">Where the current chart data originates.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm text-slate-300">
+                <DataSourceBadge dataSource={dataSource} fetchedAt={fetchedAt as any} />
+
+                <div className="space-y-1.5 text-xs text-slate-400">
+                  {dataSource === "world_bank_live" && <p className="text-emerald-300">✓ Just fetched fresh from World Bank API</p>}
+                  {dataSource === "world_bank_cache" && <p className="text-cyan-300">✓ Served from 24-hour API cache</p>}
+                  {dataSource === "snapshot" && <p className="text-slate-400">⚠ World Bank API unavailable — showing CSV snapshot</p>}
+                  <p>Cache TTL: 24 hours per country/indicator</p>
+                </div>
+
+                <Button
+                  onClick={runRefresh}
+                  disabled={refreshMutation.isPending || chart.isFetching}
+                  variant="outline"
+                  className="w-full border-white/10 bg-white/5 text-white hover:bg-white/10"
+                >
+                  {refreshMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Force refresh from World Bank
+                </Button>
+                <p className="text-xs text-slate-500">Clears the cache and re-fetches live data for the selected countries and indicator.</p>
+              </CardContent>
+            </Card>
+
             <Card className="border-white/10 bg-white/[0.04] text-white shadow-2xl backdrop-blur-xl">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg"><Database className="h-5 w-5 text-cyan-200" /> Snapshot metadata</CardTitle>
-                <CardDescription className="text-slate-400">Served through public tRPC endpoints.</CardDescription>
+                <CardDescription className="text-slate-400">Baseline CSV snapshot stored in Manus Database.</CardDescription>
               </CardHeader>
               <CardContent className="text-sm text-slate-300">
                 <p>Source: <span className="text-white">{catalog.data?.snapshot?.source ?? "loading"}</span></p>
@@ -198,8 +312,17 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
             {(view === "overview" || view === "explorer") && (
               <Card className="border-white/10 bg-white/[0.04] text-white shadow-2xl backdrop-blur-xl">
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div><CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-cyan-200" /> {selectedIndicator?.label ?? "Economic Indicator"}</CardTitle><CardDescription className="text-slate-400">Interactive Recharts visualization across selected countries.</CardDescription></div>
-                  {chart.isFetching ? <Loader2 className="h-5 w-5 animate-spin text-cyan-200" /> : null}
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-cyan-200" />
+                      {selectedIndicator?.label ?? "Economic Indicator"}
+                    </CardTitle>
+                    <CardDescription className="mt-1 text-slate-400">Interactive Recharts visualization across selected countries.</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <DataSourceBadge dataSource={dataSource} fetchedAt={fetchedAt as any} />
+                    {chart.isFetching && <Loader2 className="h-4 w-4 animate-spin text-cyan-200" />}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="h-[440px]">
@@ -244,6 +367,12 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
                   <div className="prose prose-invert max-w-none rounded-2xl border border-white/10 bg-slate-950/50 p-5 text-slate-200">
                     {insight.data?.insight ? <Streamdown>{insight.data.insight}</Streamdown> : <p className="m-0 text-slate-400"><Bot className="mr-2 inline h-4 w-4" />Select countries and an indicator, then generate an evidence-grounded trend summary.</p>}
                   </div>
+                  {insight.data && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <DataSourceBadge dataSource={insight.data.dataSource as DataSource} />
+                      <span className="text-xs text-slate-400">{insight.data.recordCount} records used</span>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -261,7 +390,7 @@ export default function Home({ view = "overview" }: { view?: ViewName }) {
       <Separator className="my-8 bg-white/10" />
       <footer className="flex flex-col gap-2 pb-6 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
         <p>Original repository logic preserved under <span className="text-slate-200">/legacy</span>; new UI uses Recharts and tRPC.</p>
-        <p className="flex items-center gap-2"><RefreshCw className="h-4 w-4" /> Database snapshots and World Bank cache are server-managed.</p>
+        <p className="flex items-center gap-2"><RefreshCw className="h-4 w-4" /> Live World Bank data fetched on demand · 24-hour TTL cache · CSV snapshot fallback.</p>
       </footer>
     </div>
   );
