@@ -1,22 +1,71 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+
+    <!-- ===== Primary SEO ===== -->
     <title>Global Economic Data Dashboard | AI-Powered World Bank Insights</title>
-    <meta name="description" content="Explore GDP, population, inflation, unemployment, FDI, and foreign reserves across major economies with Recharts visual analytics, Manus Database snapshots, and AI-powered economic insights." />
-    <meta name="keywords" content="World Bank Open Data, economic dashboard, GDP, inflation, unemployment, FDI, foreign reserves, Manus AI, Recharts" />
+    <meta name="description" content="Explore GDP, population, inflation, unemployment, FDI, and foreign reserves across 10 major economies with live World Bank data, Recharts visual analytics, Manus Database snapshots, and AI-powered economic insights." />
+    <meta name="keywords" content="World Bank Open Data, economic dashboard, GDP, inflation, unemployment, FDI, foreign reserves, Manus AI, Recharts, global economy, macroeconomics" />
+    <meta name="author" content="Global Economic Data Dashboard" />
+    <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#020617" />
+    <link rel="canonical" href="https://dashboard-econ.manus.space/" />
+
+    <!-- ===== Open Graph (Facebook / LINE / general SNS) ===== -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Global Economic Data Dashboard" />
-    <meta property="og:description" content="A polished full-stack economic dashboard with World Bank data, Manus Database-backed snapshots, interactive Recharts, and AI trend summaries." />
-    <meta property="og:image" content="/manus-storage/economic-dashboard-ogp_b8f26e28.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="Global Economic Data Dashboard" />
+    <meta property="og:title" content="Global Economic Data Dashboard | AI-Powered World Bank Insights" />
+    <meta property="og:description" content="世界銀行オープンデータを活用したインタラクティブな経済ダッシュボード。GDP・インフレ・失業率など6指標を10カ国分、AIインサイト付きで可視化。" />
+    <meta property="og:url" content="https://dashboard-econ.manus.space/" />
+    <meta property="og:image" content="https://d2xsxph8kpxj0f.cloudfront.net/310419663027084947/byEw2FDkgQS7rnYKQtfyLH/ogp-economic-dashboard-QepdcoctRuVU3o739aku8C.png" />
+    <meta property="og:image:secure_url" content="https://d2xsxph8kpxj0f.cloudfront.net/310419663027084947/byEw2FDkgQS7rnYKQtfyLH/ogp-economic-dashboard-QepdcoctRuVU3o739aku8C.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="2560" />
+    <meta property="og:image:height" content="1440" />
+    <meta property="og:image:alt" content="Global Economic Data Dashboard – World Bank Open Data, AI Insights, Live Analytics" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:locale:alternate" content="en_US" />
+
+    <!-- ===== Twitter / X Card ===== -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Global Economic Data Dashboard" />
-    <meta name="twitter:description" content="Interactive World Bank economic indicators with AI-powered analysis and database-backed snapshots." />
-    <meta name="twitter:image" content="/manus-storage/economic-dashboard-ogp_b8f26e28.png" />
+    <meta name="twitter:site" content="@ManusAI" />
+    <meta name="twitter:creator" content="@ManusAI" />
+    <meta name="twitter:title" content="Global Economic Data Dashboard | AI-Powered World Bank Insights" />
+    <meta name="twitter:description" content="世界銀行オープンデータ × Manus AI。GDP・インフレ・失業率など10カ国6指標をリアルタイム可視化 + AIトレンド分析。" />
+    <meta name="twitter:image" content="https://d2xsxph8kpxj0f.cloudfront.net/310419663027084947/byEw2FDkgQS7rnYKQtfyLH/ogp-economic-dashboard-QepdcoctRuVU3o739aku8C.png" />
+    <meta name="twitter:image:alt" content="Global Economic Data Dashboard – World Bank Open Data, AI Insights, Live Analytics" />
+    <meta name="twitter:url" content="https://dashboard-econ.manus.space/" />
+
+    <!-- ===== LINE (uses og: tags; explicit image size helps LINE crawler) ===== -->
+    <!-- LINE reads og:image, og:title, og:description – already set above -->
+    <!-- Ensure image is ≥ 200×200 px and < 10 MB (our 2560×1440 PNG satisfies this) -->
+
+    <!-- ===== Facebook App ID (optional, improves Insights tracking) ===== -->
+    <!-- <meta property="fb:app_id" content="YOUR_FB_APP_ID" /> -->
+
+    <!-- ===== Structured Data (JSON-LD) ===== -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Global Economic Data Dashboard",
+      "description": "Interactive economic dashboard powered by World Bank Open Data with AI-generated insights, live 24-hour cached data, and Recharts visualizations for 10 major economies.",
+      "url": "https://dashboard-econ.manus.space/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "inLanguage": ["ja", "en"],
+      "image": "https://d2xsxph8kpxj0f.cloudfront.net/310419663027084947/byEw2FDkgQS7rnYKQtfyLH/ogp-economic-dashboard-QepdcoctRuVU3o739aku8C.png",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "JPY"
+      }
+    }
+    </script>
+
+    <!-- ===== Fonts ===== -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />

@@ -28,3 +28,15 @@
 - [x] Add manual refresh button to Explorer view that calls `economic.refreshData`.
 - [x] Update snapshot metadata card to reflect live World Bank data when available.
 - [x] Run tests, build, checkpoint.
+
+## OGP & SNS Meta Tags
+
+- [x] Generate dedicated OGP image (2560×1440 PNG) with AI.
+- [x] Set og:image, og:image:secure_url, og:image:type, og:image:width, og:image:height, og:image:alt.
+- [x] Set og:locale: ja_JP and og:locale:alternate: en_US.
+- [x] Set og:type, og:site_name, og:title, og:description, og:url.
+- [x] Set twitter:card: summary_large_image, twitter:title, twitter:description, twitter:image, twitter:image:alt, twitter:url.
+- [x] Add JSON-LD WebApplication structured data.
+- [x] Add link[rel=canonical] pointing to https://dashboard-econ.manus.space/.
+- [x] Create English README.md with OGP image at top and bold public URL.
+- [x] Checkpoint and deliver.
